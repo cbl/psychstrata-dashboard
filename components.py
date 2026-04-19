@@ -1,102 +1,143 @@
+from __future__ import annotations
+
 from dash import dcc, html
-from data_synth import FeatureConfig
-from config import CARD, SECTION_TITLE, SUBHEADING, INFO_TEXT_STYLE
+
+from config import CARD, INFO_TEXT_STYLE, SECTION_TITLE, SUBHEADING
+from models import FeatureSpec
 
 
-def create_feature_input(cfg: FeatureConfig) -> html.Div:
-    input_id = f"input-{cfg.id}"
-    base_style = {
-        "marginBottom": "12px",
-        "padding": "10px",
-        "border": "1px solid #e1e1e1",
-        "borderRadius": "8px",
-        "backgroundColor": "#fafafa",
-    }
-    label_style = {"fontWeight": "600", "marginBottom": "6px", "color": "#444"}
-    
-    if cfg.kind == "numeric":
-        control = dcc.Slider(
-            id=input_id,
-            min=cfg.params["min"],
-            max=cfg.params["max"],
-            step=cfg.params.get("step", 1),
-            value=cfg.default,
-            tooltip={"always_visible": False, "placement": "bottom"},
-            marks=None,
-        )
-        value_display = html.Div(
-            id=f"value-{cfg.id}",
-            style={"fontSize": "12px", "color": "#666", "marginTop": "4px"}
-        )
-        return html.Div(
-            [html.Div(cfg.label, style=label_style), control, value_display],
-            id=f"container-{cfg.id}",
-            style=base_style,
-        )
-    
-    control = dcc.Dropdown(
-        id=input_id,
-        options=cfg.params["options"],
-        value=cfg.default,
-        clearable=False,
+def create_feature_input(spec: FeatureSpec) -> html.Div:
+    label = html.Label(
+        spec.label,
+        htmlFor=f"input-{spec.id}",
+        style={"fontWeight": "600", "fontSize": "12px", "color": "#374151"},
     )
+    help_text = (
+        html.Div(spec.description, style={"fontSize": "11px", "color": "#6b7280", "marginTop": "2px"})
+        if spec.description else None
+    )
+    control = _control_for(spec)
     return html.Div(
-        [html.Div(cfg.label, style=label_style), control],
-        id=f"container-{cfg.id}",
-        style=base_style,
+        [label, control] + ([help_text] if help_text else []),
+        style={"display": "flex", "flexDirection": "column", "gap": "4px"},
     )
 
 
-def create_info_details(summary: str, content: str, style_override: dict = None) -> html.Details:
+def _control_for(spec: FeatureSpec):
+    input_id = f"input-{spec.id}"
+    if spec.kind == "numeric":
+        return dcc.Input(
+            id=input_id,
+            type="number",
+            min=spec.min,
+            max=spec.max,
+            step=spec.step,
+            value=spec.default,
+            debounce=True,
+            style={
+                "padding": "6px 10px",
+                "border": "1px solid #d1d5db",
+                "borderRadius": "6px",
+                "fontSize": "14px",
+                "width": "100%",
+            },
+        )
+    options = [{"label": opt.label, "value": opt.value} for opt in (spec.options or ())]
+    return dcc.Dropdown(
+        id=input_id,
+        options=options,
+        value=spec.default,
+        clearable=False,
+        style={"fontSize": "14px"},
+    )
+
+
+def create_feature_section(category: str, specs: list[FeatureSpec], open_by_default: bool) -> html.Details:
+    grid = html.Div(
+        [create_feature_input(s) for s in specs],
+        style={
+            "display": "grid",
+            "gridTemplateColumns": "repeat(auto-fit, minmax(220px, 1fr))",
+            "gap": "12px",
+            "marginTop": "10px",
+        },
+    )
+    summary = html.Summary(
+        [
+            html.Span(category, style={"fontWeight": "600"}),
+            html.Span(f"  ({len(specs)})", style={"color": "#6b7280", "fontSize": "12px"}),
+        ],
+        style={"cursor": "pointer", "padding": "8px 0", "fontSize": "14px"},
+    )
+    return html.Details(
+        [summary, grid],
+        open=open_by_default,
+        style={"borderBottom": "1px solid #eee", "padding": "4px 0"},
+    )
+
+
+def create_feature_form(features: list[FeatureSpec], category_order: list[str]) -> html.Div:
+    by_cat: dict[str, list[FeatureSpec]] = {}
+    for f in features:
+        by_cat.setdefault(f.category, []).append(f)
+    ordered = [c for c in category_order if c in by_cat] + [
+        c for c in by_cat if c not in category_order
+    ]
+    return html.Div(
+        [create_feature_section(c, by_cat[c], open_by_default=(i == 0)) for i, c in enumerate(ordered)],
+        style={"display": "flex", "flexDirection": "column"},
+    )
+
+
+def create_info_details(summary: str, content: str, style_override: dict | None = None) -> html.Details:
     base_style = {"marginTop": "8px"}
     if style_override:
         base_style.update(style_override)
-    
     return html.Details(
-        [
-            html.Summary(summary),
-            html.Div(content, style=INFO_TEXT_STYLE),
-        ],
+        [html.Summary(summary), html.Div(content, style=INFO_TEXT_STYLE)],
         open=False,
         style=base_style,
     )
 
 
-def create_header_card(auc: float) -> html.Div:
+def create_header_card(auc: float, diagnosis: str, model_name: str) -> html.Div:
     return html.Div(
         [
             html.Div(
                 [
-                    html.H2("Treatment Resistance Classifier", style={"margin": 0}),
+                    html.H2(f"Treatment Resistance Classifier — {diagnosis}", style={"margin": 0}),
                     html.Div(
-                        "Demo • Not medical advice",
-                        style={"color": "#6b7280", "fontSize": "12px", "marginTop": "2px"}
+                        f"Demo • {model_name} • Not medical advice",
+                        style={"color": "#6b7280", "fontSize": "12px", "marginTop": "2px"},
                     ),
                     html.Div(
-                        "Important: This demo uses fully synthetic (non-real) data created for illustration. "
-                        "It does not reflect actual patient information, clinical outcomes, or treatment insights. "
-                        "It is not a medical device and should not be used for diagnosis or treatment decisions. "
-                        "For medical guidance, please consult a qualified clinician.",
+                        "This demo uses fully synthetic data created for illustration. "
+                        "It does not reflect actual patient information. "
+                        "It is not a medical device and must not be used for clinical decisions.",
                         style={
                             "color": "#6b7280", "fontSize": "12px", "marginTop": "6px",
-                            "maxWidth": "820px", "lineHeight": "1.4"
-                        }
+                            "maxWidth": "820px", "lineHeight": "1.4",
+                        },
                     ),
                 ],
-                style={"display": "flex", "flexDirection": "column"}
+                style={"display": "flex", "flexDirection": "column"},
             ),
             html.Div(
                 [
                     html.Span("Model AUC", style={"marginRight": "8px", "color": "#6b7280", "fontSize": "12px"}),
-                    html.Span(f"{auc:.3f}", style={
-                        "display": "inline-block", "padding": "4px 10px", "borderRadius": "999px",
-                        "backgroundColor": "#eef2ff", "color": "#3730a3", "fontSize": "12px", "fontWeight": "600",
-                    }),
+                    html.Span(
+                        f"{auc:.3f}",
+                        style={
+                            "display": "inline-block", "padding": "4px 10px", "borderRadius": "999px",
+                            "backgroundColor": "#eef2ff", "color": "#3730a3",
+                            "fontSize": "12px", "fontWeight": "600",
+                        },
+                    ),
                 ],
-                style={"display": "flex", "alignItems": "center", "gap": "4px"}
+                style={"display": "flex", "alignItems": "center", "gap": "4px"},
             ),
         ],
-        style={**CARD, "display": "flex", "justifyContent": "space-between", "alignItems": "flex-start"}
+        style={**CARD, "display": "flex", "justifyContent": "space-between", "alignItems": "flex-start"},
     )
 
 
@@ -104,42 +145,45 @@ def create_prediction_card() -> html.Div:
     return html.Div(
         [
             html.H4("Prediction", style=SECTION_TITLE),
-            html.Div("Random Forest Base Prediction", style=SUBHEADING),
-            dcc.Graph(id="pred-indicator", config={"displayModeBar": False}, style={"height": "200px", "marginTop": "4px"}),
+            html.Div("Probability of treatment resistance", style=SUBHEADING),
+            dcc.Graph(id="pred-indicator", config={"displayModeBar": False},
+                      style={"height": "200px", "marginTop": "4px"}),
             html.Div(
                 [
-                    html.Div("Conformal Prediction Guarantees", style={**SUBHEADING, "marginBottom": "6px"}),
-                    html.Div("Confidence interval (%)", style={"fontSize": "12px", "color": "#444", "marginBottom": "4px"}),
-                    dcc.Slider(id="ci-slider", min=80, max=99, step=1, value=95, marks={x: str(x) for x in [80, 85, 90, 95, 99]}),
-                    html.Div(
-                        [html.Div(id="prediction-badge", children="")],
-                        style={"display": "flex", "justifyContent": "center", "marginTop": "10px"}
-                    ),
+                    html.Div("Conformal prediction", style={**SUBHEADING, "marginBottom": "6px"}),
+                    html.Div("Confidence level (%)", style={"fontSize": "12px", "color": "#444", "marginBottom": "4px"}),
+                    dcc.Slider(id="ci-slider", min=80, max=99, step=1, value=95,
+                               marks={x: str(x) for x in [80, 85, 90, 95, 99]}),
+                    html.Div([html.Div(id="prediction-badge", children="")],
+                             style={"display": "flex", "justifyContent": "center", "marginTop": "10px"}),
                 ],
-                style={"marginTop": "10px", "padding": "10px", "backgroundColor": "#f9fafb", "borderRadius": "8px", "border": "1px solid #eee"}
+                style={"marginTop": "10px", "padding": "10px", "backgroundColor": "#f9fafb",
+                       "borderRadius": "8px", "border": "1px solid #eee"},
             ),
             create_info_details(
                 "What's this?",
-                "This gauge shows the estimated chance of treatment resistance. Green is lower risk, red is higher risk. "
-                "The badge uses a statistical method to indicate how confident the model is."
+                "The gauge shows the model's estimated resistance probability. "
+                "The badge reports a calibrated-uncertainty label at the chosen confidence level.",
             ),
         ],
-        style=CARD
+        style=CARD,
     )
 
 
 def create_shap_card() -> html.Div:
     return html.Div(
         [
-            html.H4("Feature contributions (SHAP)", style={**SECTION_TITLE, "textAlign": "center"}),
-            dcc.Graph(id="shap-bar", config={"displayModeBar": False}, style={"height": "360px", "margin": "6px auto", "width": "95%"}),
+            html.H4("Top feature contributions (SHAP)", style={**SECTION_TITLE, "textAlign": "center"}),
+            dcc.Graph(id="shap-bar", config={"displayModeBar": False},
+                      style={"height": "440px", "margin": "6px auto", "width": "95%"}),
             create_info_details(
                 "What's this?",
-                "Each bar shows how a feature pushed the prediction. Green bars lower resistance risk. Red bars raise resistance risk.",
-                {"width": "95%", "marginLeft": "auto", "marginRight": "auto"}
+                "Each bar shows how a feature pushed this prediction. Red raises resistance risk; green lowers it. "
+                "Only the top-contributing features are shown.",
+                {"width": "95%", "marginLeft": "auto", "marginRight": "auto"},
             ),
         ],
-        style=CARD
+        style=CARD,
     )
 
 
@@ -147,14 +191,16 @@ def create_tsne_card() -> html.Div:
     return html.Div(
         [
             html.H4("Population map (t-SNE)", style={**SECTION_TITLE, "textAlign": "center"}),
-            dcc.Graph(id="tsne-scatter", config={"displayModeBar": False}, style={"height": "380px", "margin": "6px auto", "width": "95%"}),
+            dcc.Graph(id="tsne-scatter", config={"displayModeBar": False},
+                      style={"height": "380px", "margin": "6px auto", "width": "95%"}),
             create_info_details(
                 "What's this?",
-                "This map places similar patients close together. Green dots are patients who responded; red dots are patients who were resistant. The blue dot shows the current selection.",
-                {"width": "95%", "marginLeft": "auto", "marginRight": "auto"}
+                "Similar patients sit near each other. Green = responsive, red = resistant. "
+                "The blue dot marks the current selection.",
+                {"width": "95%", "marginLeft": "auto", "marginRight": "auto"},
             ),
         ],
-        style=CARD
+        style=CARD,
     )
 
 
@@ -169,17 +215,13 @@ def create_llm_summary_card() -> html.Div:
                         id="llm-explain-button",
                         n_clicks=0,
                         style={
-                            "padding": "8px 14px",
-                            "borderRadius": "8px",
-                            "border": "1px solid #2563eb",
-                            "backgroundColor": "#2563eb",
-                            "color": "white",
-                            "fontWeight": "600",
-                            "cursor": "pointer",
+                            "padding": "8px 14px", "borderRadius": "8px",
+                            "border": "1px solid #2563eb", "backgroundColor": "#2563eb",
+                            "color": "white", "fontWeight": "600", "cursor": "pointer",
                         },
                     ),
                     html.Div(
-                        "Change the features, then click to generate or refresh the explanation.",
+                        "Change any feature, then click to refresh the explanation.",
                         id="llm-summary-status",
                         style={"fontSize": "12px", "color": "#6b7280"},
                     ),
@@ -190,17 +232,11 @@ def create_llm_summary_card() -> html.Div:
                 html.Div(
                     dcc.Markdown(
                         id="llm-summary",
-                        children=(
-                            "Click **Explain this to me** to generate a plain-language summary for the current selection."
-                        ),
+                        children="Click **Explain this to me** to generate a plain-language summary.",
                         style={
-                            "backgroundColor": "#f9fafb",
-                            "border": "1px solid #eee",
-                            "borderRadius": "8px",
-                            "padding": "12px",
-                            "color": "#374151",
-                            "fontSize": "14px",
-                            "lineHeight": "1.5",
+                            "backgroundColor": "#f9fafb", "border": "1px solid #eee",
+                            "borderRadius": "8px", "padding": "12px",
+                            "color": "#374151", "fontSize": "14px", "lineHeight": "1.5",
                             "minHeight": "180px",
                         },
                     )
@@ -209,9 +245,8 @@ def create_llm_summary_card() -> html.Div:
             ),
             create_info_details(
                 "What's this?",
-                "A plain-language explanation of why the current selection pushed the prediction up or down, "
-                "including supporting literature citations where relevant."
+                "A plain-language walk-through of which features pushed this prediction up or down.",
             ),
         ],
-        style={**CARD, "flex": 1}
+        style={**CARD, "flex": 1},
     )

@@ -1,46 +1,60 @@
-# Treatment Resistance Classifier Demo
+# Psych-STRATA Treatment Resistance Dashboard
 
-Interactive dashboard for predicting treatment resistance in depression using machine learning with uncertainty quantification.
+Interactive web demo for predicting treatment resistance in Major Depressive Disorder. Built as the consortium-facing front-end for the Psych-STRATA WP2 prognostic modelling work.
 
-**Disclaimer:** This demo uses synthetic data for illustration purposes only. It is not a medical device and must not be used for clinical decisions.
+**This demo uses fully synthetic data. It is not a medical device and must not be used for clinical decisions.**
 
-## Features
+## What's in it
 
-- Random Forest classifier with ROC-AUC evaluation
-- Conformal prediction for calibrated uncertainty estimates
-- SHAP-based feature contribution analysis
-- LLM-generated plain-language explanation grounded in SHAP and README evidence snippets
-- t-SNE population visualization
+- Pluggable model layer (`models/`) — swap RandomForest for DeepHit / HACSurv / Cox by pointing at a different model folder
+- 46-feature MDD-specific input form, grouped by clinical category (demographics, severity, comorbidities, treatment history, biomarkers, family history, …)
+- RandomForest classifier with conformal-prediction uncertainty (MAPIE)
+- SHAP feature attributions with human-readable labels
+- t-SNE population map
+- LLM-generated plain-language explanation grounded in SHAP output plus curated literature evidence
+- REST API (`/api/predict`, `/api/features`, `/api/health`)
 
-## Project Structure
+## Repository structure
 
 ```
-├── app.py              # Dash application entry point
-├── config.py           # UI configuration and feature definitions
-├── model.py            # ML model training and inference
-├── visualization.py    # Plotly figure generation
-├── components.py       # Dash UI components
-├── callbacks.py        # Dash callback registration
-├── data_synth.py       # Synthetic data generation
+psychstrata-dashboard/
+├── models/
+│   ├── base.py                     FeatureSpec, FeatureEncoder, TRModel interface
+│   ├── registry.py                 load_model(name)
+│   └── random_forest_mdd/
+│       ├── features.py             46 MDD FeatureSpec
+│       ├── synth.py                Synthetic-data generator
+│       ├── model.py                RandomForestMDD(TRModel)
+│       └── evidence.py             Literature evidence per feature
+├── app.py                          Dash app entry
+├── components.py                   UI widgets (render FeatureSpec)
+├── callbacks.py                    Wires UI → model.predict / .explain
+├── visualization.py                Plotly figures
+├── api.py                          Flask REST
+├── llm_summary.py                  LLM explanation
+├── config.py                       UI style constants
 ├── requirements.txt
 └── Dockerfile
 ```
 
-## Setup
+## Adding a new model
+
+1. Create `models/<your_model>/` with:
+   - `features.py` — list of `FeatureSpec`
+   - `model.py` — subclass of `TRModel` implementing `train`, `from_pretrained`, `save`, `predict`, `explain`
+   - `__init__.py` — expose `build_model()`
+2. Select it at runtime: `PSYCHSTRATA_MODEL=<your_model> python app.py`
+
+No Dash code needs to change — the UI is driven by `model.features`.
+
+## Running
 
 ```bash
 pip install -r requirements.txt
+python app.py                       # http://localhost:8050
 ```
 
-## Running Locally
-
-Development server:
-
-```bash
-python app.py
-```
-
-Production-like (Gunicorn):
+Production-like:
 
 ```bash
 gunicorn app:server -b 0.0.0.0:8050
@@ -49,30 +63,22 @@ gunicorn app:server -b 0.0.0.0:8050
 Docker:
 
 ```bash
-docker build -t treatment-classifier .
-docker run -e OPENAI_API_KEY="$OPENAI_API_KEY" -p 8050:8050 treatment-classifier
+docker build -t psychstrata-dashboard .
+docker run -e OPENAI_API_KEY="$OPENAI_API_KEY" -p 8050:8050 psychstrata-dashboard
 ```
 
-Access at `http://localhost:8050`
+The LLM explanation uses `OPENAI_API_KEY` from the environment. The prompt is constrained to live SHAP output plus the literature snippets in `models/random_forest_mdd/evidence.py`.
 
-The LLM explanation reads the OpenAI API key from the `OPENAI_API_KEY` environment variable. The app constrains the prompt to live SHAP results plus the literature snippets and PMIDs listed below so the generated summary stays as grounded as possible.
+## Feature set
 
-## Literature Evidence on Predictors of Treatment Resistance
+The 46 features are the MDD subset of the Psych-STRATA primary feature catalog (`code/docs/features.md` in the sibling `code/` repo), excluding the 30 genetics features. Grouped into 12 categories. Feature definitions and literature references live in that file.
 
-Generation of synthetic data ([data_synth.py](data_synth.py)) is based on general literature evidence of treatment resistance factors:
+## Evidence for key predictors
 
-| Predictor                     | Association                                                                                  | References                                                               |
-| ----------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Baseline severity (PHQ-9)     | Higher severity → higher TR risk                                                             | Souery 2007 (PMID: 17685743) *(Papakostas 2015 removed – not relevant)*  |
-| Episode duration / chronicity | Longer duration → higher TR risk                                                             | Souery 2007 (PMID: 17685743), Fekadu 2009 (PMID: 19193338)               |
-| Prior treatment failures      | More failures → higher TR risk                                                               | Berlim & Turecki 2007 (PMID: 17388795), Fava 2003 (PMID: 12716236)       |
-| Poor adherence                | Nonadherence → higher TR risk *(conceptual; confounder of pseudo-resistance)*                | Souery 2006 (PMID: 16727297)                                             |
-| SSRI dose (sertraline)        | 50–200 mg effective; limited benefit above 100 mg *(not a predictor of TR)*                  | Hieronymus 2016 (PMID: 27052632), Cipriani 2018 (PMID: 29477251)         |
-| Quetiapine augmentation       | 150–300 mg/day; modest effect, tolerability concerns *(treatment, not predictor)*            | Komossa 2010 (PMID: 20091549), Nelson & Papakostas 2009 (PMID: 19289445) |
-| Lithium augmentation          | 600–900 mg/day; strong evidence for TRD *(treatment, not predictor)*                         | Nelson 2014 (PMID: 25016772), Bschor 2014 (PMID: 24792557)               |
-| Early improvement (week 2)    | No early improvement → higher TR risk *(predicts non-response rather than TRD specifically)* | Stassen 2007 (PMID: 17388796), Szegedi 2009 (PMID: 19607757)             |
-| Sleep disturbance / insomnia  | Insomnia → higher TR risk *(weak / indirect evidence)*                                       | Wichniak 2017 (PMID: 28427964), Dew 1997 (PMID: 9255847)                 |
-| Substance use                 | Regular use → higher TR risk *(evidence exists but not directly supported by cited paper)*   | Nunes & Levin 2004 (PMID: 15033227), Fava 2003 (PMID: 12716236)          |
-| Comorbid anxiety              | Anxiety → higher TR risk *(supported in TRD cohorts; Papakostas 2015 removed)*               | Souery 2007 (PMID: 17685743)                                             |
-| Side effect burden            | Side effects → dose reduction → higher TR risk *(not well established as predictor)*         | Souery 2006 (PMID: 16727297)                                             |
-| Sex (female vs male)          | Mixed/inconsistent evidence                                                                  | Khan 2005 (PMID: 15794786)                                               |
+The feature catalog is populated in `models/random_forest_mdd/features.py`. Literature evidence (PMIDs) in `models/random_forest_mdd/evidence.py` is added incrementally — each entry is verified against PubMed before inclusion.
+
+Full literature documentation for the underlying predictors lives in the sibling `code/docs/features.md`.
+
+## License
+
+See [LICENSE](LICENSE).
