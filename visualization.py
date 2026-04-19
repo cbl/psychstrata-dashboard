@@ -31,6 +31,19 @@ def create_indicator_figure(prob: float) -> go.Figure:
 
 
 def create_shap_bar_figure(explanation: Explanation, encoder: FeatureEncoder, top_n: int = 15) -> go.Figure:
+    if not explanation.shap_values:
+        fig = go.Figure()
+        fig.update_layout(
+            title={"text": "SHAP attributions unavailable for this model", "x": 0.5},
+            xaxis={"visible": False}, yaxis={"visible": False},
+            annotations=[{
+                "text": "No SHAP available", "x": 0.5, "y": 0.5,
+                "showarrow": False, "font": {"size": 14, "color": "#6b7280"},
+                "xref": "paper", "yref": "paper",
+            }],
+            plot_bgcolor="white", margin=dict(l=20, r=20, t=50, b=20),
+        )
+        return fig
     ranked = sorted(explanation.shap_values.items(), key=lambda kv: abs(kv[1]), reverse=True)[:top_n]
     ranked.sort(key=lambda kv: abs(kv[1]))
     labels = [encoder.inverse_feature_name(col) for col, _ in ranked]
@@ -58,6 +71,19 @@ def create_shap_bar_figure(explanation: Explanation, encoder: FeatureEncoder, to
 def create_tsne_scatter_figure(
     embedding: np.ndarray, y_labels: np.ndarray, sel_x: float, sel_y: float,
 ) -> go.Figure:
+    if embedding.size == 0:
+        fig = go.Figure()
+        fig.update_layout(
+            title={"text": "Population map unavailable for this model", "x": 0.5},
+            xaxis={"visible": False}, yaxis={"visible": False},
+            annotations=[{
+                "text": "No embedding available", "x": 0.5, "y": 0.5,
+                "showarrow": False, "font": {"size": 14, "color": "#6b7280"},
+                "xref": "paper", "yref": "paper",
+            }],
+            plot_bgcolor="white", margin=dict(l=20, r=20, t=50, b=20),
+        )
+        return fig
     resistant = y_labels == 1
     responsive = y_labels == 0
 
