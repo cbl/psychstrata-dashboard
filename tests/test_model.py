@@ -29,6 +29,7 @@ def test_predict_on_defaults_returns_valid_prediction(trained_model: RandomFores
     assert p.label in {"Resistant", "Responsive", "Uncertain"}
     assert 0.0 <= p.probability <= 1.0
     assert p.conformal_set is not None
+    assert p.cause_curves is None
 
 
 def test_explain_returns_shap_for_every_model_column(trained_model: RandomForestMDD) -> None:

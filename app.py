@@ -3,6 +3,7 @@ from dash import Dash, html
 from api import register_api
 from callbacks import register_callbacks
 from components import (
+    create_cif_card,
     create_feature_form,
     create_header_card,
     create_llm_summary_card,
@@ -40,7 +41,7 @@ def create_layout() -> html.Div:
                "flexDirection": "column", "gap": "12px"},
     )
     right_column = html.Div(
-        [create_prediction_card(), create_shap_card(), create_tsne_card()],
+        [create_prediction_card(), create_cif_card(), create_shap_card(), create_tsne_card()],
         style={"flex": "1", "minWidth": "360px", "display": "flex",
                "flexDirection": "column", "gap": "12px"},
     )

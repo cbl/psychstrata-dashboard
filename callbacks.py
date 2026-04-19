@@ -9,6 +9,7 @@ from config import PILL
 from llm_summary import generate_prediction_summary
 from models import Prediction, TRModel
 from visualization import (
+    create_cif_figure,
     create_indicator_figure,
     create_shap_bar_figure,
     create_tsne_scatter_figure,
@@ -26,11 +27,14 @@ def register_callbacks(app: Dash, model: TRModel) -> None:
     feature_ids = [f.id for f in model.features]
     input_ids = [f"input-{fid}" for fid in feature_ids]
 
+    horizon = getattr(model, "horizon_years", None)
+
     @app.callback(
         [
             Output("pred-indicator", "figure"),
             Output("prediction-badge", "children"),
             Output("prediction-badge", "style"),
+            Output("cif-curve", "figure"),
             Output("shap-bar", "figure"),
             Output("tsne-scatter", "figure"),
         ],
@@ -46,11 +50,12 @@ def register_callbacks(app: Dash, model: TRModel) -> None:
         badge_label = prediction.label
         badge_style = _badge_style(badge_label)
 
+        cif_fig = create_cif_figure(prediction.cause_curves, horizon_years=horizon)
         shap_fig = create_shap_bar_figure(explanation, model.encoder, top_n=15)
         sel_x, sel_y = model.tsne_position(raw)
         tsne_fig = create_tsne_scatter_figure(model.tsne_embedding, model.y_labels, sel_x, sel_y)
 
-        return indicator, badge_label, badge_style, shap_fig, tsne_fig
+        return indicator, badge_label, badge_style, cif_fig, shap_fig, tsne_fig
 
     @app.callback(
         [Output("llm-summary", "children"), Output("llm-summary-status", "children")],

@@ -39,6 +39,8 @@ DEFAULT_PLACEHOLDER_EPOCHS = 30
 TR_CAUSE_INDEX = 0
 HORIZON_YEARS = 5.0
 
+CAUSE_LABELS: list[str] = ["Treatment resistance", "Death", "Discontinuation"]
+
 
 class DeepHitMDD(TRModel):
     name = "deephit_mdd"
@@ -112,14 +114,19 @@ class DeepHitMDD(TRModel):
         (path / "model_config.json").write_text(json.dumps(config_dict, indent=2))
 
     def predict(self, raw: dict[str, Any]) -> Prediction:
-        cif_tr_curve, bin_centers = self._cif_for_tr(raw)
-        horizon_prob = float(_cif_at_time(cif_tr_curve, bin_centers, self.horizon_years))
-        risk_curve = {float(t): float(c) for t, c in zip(bin_centers, cif_tr_curve)}
+        cif_all, bin_centers = self._cif_all_causes(raw)
+        cause_curves: dict[str, dict[float, float]] = {}
+        for i in range(cif_all.shape[0]):
+            label = CAUSE_LABELS[i] if i < len(CAUSE_LABELS) else f"Cause {i + 1}"
+            cause_curves[label] = {float(t): float(c) for t, c in zip(bin_centers, cif_all[i])}
+
+        tr_curve = cif_all[min(TR_CAUSE_INDEX, cif_all.shape[0] - 1)]
+        horizon_prob = float(_cif_at_time(tr_curve, bin_centers, self.horizon_years))
         label = "Resistant" if horizon_prob >= 0.5 else "Responsive"
         return Prediction(
             label=label,
             probability=horizon_prob,
-            risk_curve=risk_curve,
+            cause_curves=cause_curves,
             conformal_set=[label],
         )
 
@@ -179,15 +186,14 @@ class DeepHitMDD(TRModel):
         logger.info("DeepHit: loaded state_dict from %s", state_path)
         return True
 
-    def _cif_for_tr(self, raw: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+    def _cif_all_causes(self, raw: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
         assert self._pipeline is not None and self._model is not None and self._time_bins is not None
         df = ui_to_pipeline_df(raw)
         X, _, _, _ = self._pipeline.transform(df)
         with torch.no_grad():
             cif = self._model.predict_cif(torch.from_numpy(X).float()).cpu().numpy()[0]
-        cause_idx = min(TR_CAUSE_INDEX, cif.shape[0] - 1)
         bin_centers = 0.5 * (self._time_bins[:-1] + self._time_bins[1:])
-        return cif[cause_idx], bin_centers
+        return cif, bin_centers
 
 
 def _synthetic_mdd_cohort(seed: int = DEFAULT_SEED, n_mdd: int = DEFAULT_N_SYNTH) -> pd.DataFrame:

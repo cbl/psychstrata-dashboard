@@ -170,6 +170,25 @@ def create_prediction_card() -> html.Div:
     )
 
 
+def create_cif_card() -> html.Div:
+    return html.Div(
+        [
+            html.H4("Cumulative incidence (CIF)", style={**SECTION_TITLE, "textAlign": "center"}),
+            dcc.Graph(id="cif-curve", config={"displayModeBar": False},
+                      style={"height": "360px", "margin": "6px auto", "width": "95%"}),
+            create_info_details(
+                "What's this?",
+                "For this patient, the model's predicted cumulative probability of each outcome over time. "
+                "Treatment resistance is the primary outcome; death and discontinuation are competing risks. "
+                "The dashed green line is the remaining event-free probability (= 1 − sum of the others). "
+                "The dot marks the 5-year horizon on the TR curve.",
+                {"width": "95%", "marginLeft": "auto", "marginRight": "auto"},
+            ),
+        ],
+        style=CARD,
+    )
+
+
 def create_shap_card() -> html.Div:
     return html.Div(
         [

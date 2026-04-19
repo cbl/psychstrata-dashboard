@@ -54,12 +54,24 @@ def test_adapter_encodes_sex_as_binary() -> None:
     assert ui_to_pipeline_df({**raw, "sex": "Male"}).loc[0, "sex"] == 1
 
 
-def test_predict_returns_risk_curve_and_valid_probability(deephit: DeepHitMDD) -> None:
+def test_predict_returns_probability_and_cause_curves(deephit: DeepHitMDD) -> None:
     p = deephit.predict(_defaults(deephit))
     assert 0.0 <= p.probability <= 1.0
     assert p.label in {"Resistant", "Responsive"}
-    assert p.risk_curve is not None and len(p.risk_curve) > 0
-    assert all(0.0 <= v <= 1.0 for v in p.risk_curve.values())
+    assert p.cause_curves is not None
+    assert set(p.cause_curves) == {"Treatment resistance", "Death", "Discontinuation"}
+    for curve in p.cause_curves.values():
+        assert len(curve) > 0
+        assert all(0.0 <= v <= 1.0 for v in curve.values())
+
+
+def test_cause_curves_are_non_decreasing(deephit: DeepHitMDD) -> None:
+    p = deephit.predict(_defaults(deephit))
+    assert p.cause_curves is not None
+    for cause, curve in p.cause_curves.items():
+        ordered = [curve[t] for t in sorted(curve)]
+        for a, b in zip(ordered, ordered[1:]):
+            assert b + 1e-6 >= a, f"{cause} not monotone at some step"
 
 
 def test_explain_returns_empty_placeholder(deephit: DeepHitMDD) -> None:

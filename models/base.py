@@ -103,7 +103,7 @@ class Contributor:
 class Prediction:
     label: str
     probability: float | None = None
-    risk_curve: dict[float, float] | None = None
+    cause_curves: dict[str, dict[float, float]] | None = None
     conformal_set: list[str] | None = None
 
 
