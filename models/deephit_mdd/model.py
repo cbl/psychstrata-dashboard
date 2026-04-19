@@ -15,14 +15,26 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import torch
-from psychstrata.data.synthetic import CohortConfig, generate_cohort
-from psychstrata.data.transforms import TransformConfig, TransformPipeline
-from psychstrata.nn.models.deephit import DeepHit, DeepHitConfig, deephit_loss
+
+try:
+    import shap
+    import torch
+    import torch.nn as nn
+    from psychstrata.data.synthetic import CohortConfig, generate_cohort
+    from psychstrata.data.transforms import TransformConfig, TransformPipeline
+    from psychstrata.nn.models.deephit import DeepHit, DeepHitConfig, deephit_loss
+
+    _DEEPHIT_AVAILABLE = True
+    _DEEPHIT_IMPORT_ERROR: Exception | None = None
+except ImportError as _exc:
+    _DEEPHIT_AVAILABLE = False
+    _DEEPHIT_IMPORT_ERROR = _exc
 
 from ..base import (
+    Contributor,
     Explanation,
     FeatureEncoder,
+    FeatureSpec,
     Prediction,
     TRModel,
 )
@@ -30,9 +42,18 @@ from ..random_forest_mdd.features import MDD_FEATURES
 from .adapter import ui_to_pipeline_df
 from .evidence import FEATURE_EVIDENCE
 
+
+def _require_deephit() -> None:
+    if not _DEEPHIT_AVAILABLE:
+        raise ImportError(
+            "DeepHit requires the psychstrata package (plus torch + shap).\n"
+            "Install it with: pip install psychstrata torch shap\n"
+            f"Original import error: {_DEEPHIT_IMPORT_ERROR}"
+        )
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_ARTIFACTS_DIR = Path("/home/lcb/scai/psychstrata2/models")
+DEFAULT_ARTIFACTS_DIR = Path(__file__).resolve().parent.parent.parent / "artifacts" / "deephit_mdd"
 DEFAULT_N_SYNTH = 2000
 DEFAULT_SEED = 42
 DEFAULT_PLACEHOLDER_EPOCHS = 30
@@ -40,6 +61,8 @@ TR_CAUSE_INDEX = 0
 HORIZON_YEARS = 5.0
 
 CAUSE_LABELS: list[str] = ["Treatment resistance", "Death", "Discontinuation"]
+SHAP_BACKGROUND_N = 50
+SHAP_TOP_K = 3
 
 
 class DeepHitMDD(TRModel):
@@ -55,9 +78,12 @@ class DeepHitMDD(TRModel):
         self._pipeline: TransformPipeline | None = None
         self._model: DeepHit | None = None
         self._time_bins: np.ndarray | None = None
+        self._shap_explainer: shap.GradientExplainer | None = None
+        self._pipeline_feature_names: list[str] = []
 
     @classmethod
     def build(cls, artifacts_dir: Path | None = None) -> "DeepHitMDD":
+        _require_deephit()
         artifacts_dir = Path(
             artifacts_dir
             or os.environ.get("DEEPHIT_ARTIFACTS_DIR", DEFAULT_ARTIFACTS_DIR)
@@ -90,6 +116,8 @@ class DeepHitMDD(TRModel):
         instance._pipeline = pipeline
         instance._model = network
         instance._time_bins = pipeline.get_time_bins()
+        instance._pipeline_feature_names = pipeline.get_feature_names()
+        instance._init_shap(X)
         return instance
 
     @classmethod
@@ -131,7 +159,18 @@ class DeepHitMDD(TRModel):
         )
 
     def explain(self, raw: dict[str, Any]) -> Explanation:
-        return Explanation(shap_values={}, top_positive=[], top_negative=[])
+        if self._shap_explainer is None:
+            return Explanation(shap_values={}, top_positive=[], top_negative=[])
+
+        df = ui_to_pipeline_df(raw)
+        X, _, _, _ = self._pipeline.transform(df)
+        x_tensor = torch.from_numpy(X).float()
+        shap_raw = self._shap_explainer.shap_values(x_tensor)
+        values = np.asarray(shap_raw).reshape(-1)[: len(self._pipeline_feature_names)]
+        shap_dict = dict(zip(self._pipeline_feature_names, values.tolist()))
+
+        positive, negative = self._rank_contributors(shap_dict, raw)
+        return Explanation(shap_values=shap_dict, top_positive=positive, top_negative=negative)
 
     def tsne_position(self, raw: dict[str, Any]) -> tuple[float, float]:
         return 0.0, 0.0
@@ -186,6 +225,43 @@ class DeepHitMDD(TRModel):
         logger.info("DeepHit: loaded state_dict from %s", state_path)
         return True
 
+    def _init_shap(self, X_train: np.ndarray) -> None:
+        try:
+            bin_centers = 0.5 * (self._time_bins[:-1] + self._time_bins[1:])
+            horizon_bin = int(np.argmin(np.abs(bin_centers - self.horizon_years)))
+            wrapper = _TRHorizonWrapper(self._model, TR_CAUSE_INDEX, horizon_bin)
+            rng = np.random.default_rng(DEFAULT_SEED)
+            n_bg = min(SHAP_BACKGROUND_N, len(X_train))
+            bg_idx = rng.choice(len(X_train), size=n_bg, replace=False)
+            background = torch.from_numpy(X_train[bg_idx]).float()
+            self._shap_explainer = shap.GradientExplainer(wrapper, background)
+        except Exception as exc:
+            logger.warning("DeepHit SHAP init failed (%s) — explanations disabled", exc)
+            self._shap_explainer = None
+
+    def _rank_contributors(
+        self, shap_dict: dict[str, float], raw: dict[str, Any],
+    ) -> tuple[list[Contributor], list[Contributor]]:
+        ranked = sorted(shap_dict.items(), key=lambda kv: abs(kv[1]), reverse=True)
+        positive: list[Contributor] = []
+        negative: list[Contributor] = []
+        for col, sv in ranked:
+            if len(positive) >= SHAP_TOP_K and len(negative) >= SHAP_TOP_K:
+                break
+            human_label, feature_id = _humanize_pipeline_col(col, self.features)
+            selected = _selected_value_for_col(col, raw, self.encoder)
+            c = Contributor(
+                feature_id=feature_id,
+                human_label=human_label,
+                selected_value=selected,
+                shap_value=float(sv),
+            )
+            if sv > 0 and len(positive) < SHAP_TOP_K:
+                positive.append(c)
+            elif sv < 0 and len(negative) < SHAP_TOP_K:
+                negative.append(c)
+        return positive, negative
+
     def _cif_all_causes(self, raw: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
         assert self._pipeline is not None and self._model is not None and self._time_bins is not None
         df = ui_to_pipeline_df(raw)
@@ -232,3 +308,43 @@ def _cif_at_time(cif_curve: np.ndarray, bin_centers: np.ndarray, t: float) -> fl
         return 0.0
     idx = int(np.argmin(np.abs(bin_centers - t)))
     return float(cif_curve[idx])
+
+
+if _DEEPHIT_AVAILABLE:
+
+    class _TRHorizonWrapper(nn.Module):
+        """Scalar wrapper around DeepHit: returns P(cause @ horizon bin) per sample."""
+
+        def __init__(self, network: DeepHit, cause_index: int, horizon_bin: int):
+            super().__init__()
+            self.network = network
+            self.cause_index = cause_index
+            self.horizon_bin = horizon_bin
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            pmf = self.network(x)
+            cif = pmf.cumsum(dim=-1)
+            return cif[:, self.cause_index, self.horizon_bin].unsqueeze(-1)
+
+
+def _humanize_pipeline_col(col: str, features: list[FeatureSpec]) -> tuple[str, str]:
+    for f in features:
+        if col == f.id:
+            return f.label, f.id
+    for f in features:
+        prefix = f"{f.id}_"
+        if col.startswith(prefix):
+            return f"{f.label}: {col[len(prefix):]}", f.id
+    return col, col
+
+
+def _selected_value_for_col(col: str, raw: dict[str, Any], encoder: FeatureEncoder) -> Any:
+    if col in raw:
+        return encoder.human_value(col, raw[col])
+    for f in encoder.features:
+        prefix = f"{f.id}_"
+        if col.startswith(prefix) and f.kind in ("categorical", "ordinal", "binary"):
+            level = col[len(prefix):]
+            raw_value = raw.get(f.id)
+            return encoder.human_value(f.id, raw_value) if str(raw_value) == level else "—"
+    return "—"

@@ -7,6 +7,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+pytest.importorskip("psychstrata", reason="DeepHit needs the psychstrata package")
+pytest.importorskip("torch", reason="DeepHit needs torch")
+
 from models.deephit_mdd.adapter import (
     CYP_COLS,
     HLA_COLS,
@@ -74,11 +77,14 @@ def test_cause_curves_are_non_decreasing(deephit: DeepHitMDD) -> None:
             assert b + 1e-6 >= a, f"{cause} not monotone at some step"
 
 
-def test_explain_returns_empty_placeholder(deephit: DeepHitMDD) -> None:
+def test_explain_returns_shap_values_and_top_contributors(deephit: DeepHitMDD) -> None:
     exp = deephit.explain(_defaults(deephit))
-    assert exp.shap_values == {}
-    assert exp.top_positive == []
-    assert exp.top_negative == []
+    assert len(exp.shap_values) > 0
+    assert len(exp.top_positive) <= 3
+    assert len(exp.top_negative) <= 3
+    for c in exp.top_positive + exp.top_negative:
+        assert c.human_label
+        assert isinstance(c.shap_value, float)
 
 
 def test_save_and_reload_round_trip(deephit: DeepHitMDD, tmp_path: Path) -> None:

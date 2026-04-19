@@ -3,6 +3,18 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Local venvs
+.venv/
+venv/
+
+# Model artifacts (fit at runtime, or mounted/downloaded at deploy time)
+artifacts/
+*.pt
+*.pkl
+
+# Pytest
+.pytest_cache/
+
 # C extensions
 *.so
 
