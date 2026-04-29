@@ -8,9 +8,8 @@ __pycache__/
 venv/
 
 # Model artifacts (fit at runtime, or mounted/downloaded at deploy time)
-artifacts/
 *.pt
-*.pkl
+.pkl
 
 # Pytest
 .pytest_cache/
