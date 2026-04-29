@@ -53,7 +53,7 @@ def _require_deephit() -> None:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ARTIFACTS_DIR = Path(__file__).resolve().parent.parent.parent / "artifacts" / "deephit_mdd"
+DEFAULT_ARTIFACTS_DIR = Path(__file__).resolve().parent.parent.parent / "deephit"
 DEFAULT_N_SYNTH = 2000
 DEFAULT_SEED = 42
 DEFAULT_PLACEHOLDER_EPOCHS = 30

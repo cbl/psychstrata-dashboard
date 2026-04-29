@@ -1,0 +1,14 @@
+{
+  "type": "deephit",
+  "in_features": 215,
+  "n_causes": 3,
+  "n_time_bins": 53,
+  "shared_hidden": [
+    256,
+    256
+  ],
+  "cause_hidden": [
+    128
+  ],
+  "dropout": 0.1
+}

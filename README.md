@@ -52,10 +52,10 @@ psychstrata-dashboard/
 
 ### DeepHit artifacts
 
-`DeepHitMDD.build()` looks for model weights + fitted preprocessing pipeline at `DEEPHIT_ARTIFACTS_DIR` (default: `./artifacts/deephit_mdd/`). It expects:
+`DeepHitMDD.build()` looks for model weights + fitted preprocessing pipeline at `DEEPHIT_ARTIFACTS_DIR` (default: `./deephit/`). It expects:
 
 ```
-artifacts/deephit_mdd/
+deephit/
 ├── pipeline.pkl          fitted psychstrata TransformPipeline
 ├── model_state.pt        torch state_dict
 └── model_config.json     DeepHit architecture + in_features/n_causes/n_time_bins
